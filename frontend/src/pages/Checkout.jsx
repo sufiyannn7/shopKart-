@@ -184,11 +184,11 @@ const Checkout = ({ user }) => {
 
       const { shopKartOrderId, razorpayOrderId, amount, currency, key } = orderRes;
 
-      // 4. Load Razorpay Checkout Script
-      const isScriptLoaded = await loadRazorpayScript();
+      // 4. Check if Razorpay keys are real or placeholder test keys
+      const isPlaceholderOrder = razorpayOrderId.startsWith('order_test_') || key === 'rzp_test_shopkart1234';
 
-      if (!isScriptLoaded || !window.Razorpay) {
-        // Fallback simulation modal when Razorpay script cannot load (firewall, offline testing, etc.)
+      if (isPlaceholderOrder) {
+        // Open the Test Mode Payment Simulator directly without triggering Razorpay CDN rejection alert
         setOfflineModalData({
           shopKartOrderId,
           razorpayOrderId,
@@ -200,7 +200,22 @@ const Checkout = ({ user }) => {
         return;
       }
 
-      // 5. Open Razorpay Standard Checkout
+      // 5. Load Razorpay Checkout Script for real Razorpay test accounts
+      const isScriptLoaded = await loadRazorpayScript();
+
+      if (!isScriptLoaded || !window.Razorpay) {
+        setOfflineModalData({
+          shopKartOrderId,
+          razorpayOrderId,
+          amount,
+          currency,
+          key
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      // 6. Open Razorpay Standard Checkout
       const options = {
         key: key || 'rzp_test_shopkart1234',
         amount: amount,
@@ -575,54 +590,47 @@ const Checkout = ({ user }) => {
               <p><strong>Amount:</strong> ₹{(offlineModalData.amount / 100).toLocaleString('en-IN')}</p>
               <p>Click below to verify the cryptographic payment signature on the backend and confirm the order.</p>
             </div>
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1.25rem' }}>
               <button
-                onClick={async () => {
-                  // In offline fallback simulation, we request backend verification
-                  // Using an automated test signature generator
-                  const testPaymentId = `pay_sim_${Date.now()}`;
-                  // In real browser we call verify-payment endpoint
-                  try {
-                    setIsSubmitting(true);
-                    // Use a direct verification call helper
-                    const token = document.cookie.includes('jwt') ? '' : '';
-                    const res = await fetch('/orders/verify-payment', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({
-                        shopKartOrderId: offlineModalData.shopKartOrderId,
-                        razorpay_order_id: offlineModalData.razorpayOrderId,
-                        razorpay_payment_id: testPaymentId,
-                        razorpay_signature: 'test_fallback_sim'
-                      })
-                    });
-                    const d = await res.json();
-                    if (d.success) {
-                      clearCartState();
-                      await refreshCart();
-                      navigate(`/order-success/${offlineModalData.shopKartOrderId}`);
-                    } else {
-                      setGlobalError(d.message);
-                      setOfflineModalData(null);
-                    }
-                  } catch (err) {
-                    setGlobalError(err.message);
-                    setOfflineModalData(null);
-                  } finally {
-                    setIsSubmitting(false);
-                  }
+                type="button"
+                onClick={() => {
+                  const testPaymentId = `pay_test_${Date.now()}`;
+                  handlePaymentVerification({
+                    shopKartOrderId: offlineModalData.shopKartOrderId,
+                    razorpay_order_id: offlineModalData.razorpayOrderId,
+                    razorpay_payment_id: testPaymentId,
+                    razorpay_signature: 'test_fallback_sim'
+                  });
+                }}
+                disabled={isSubmitting}
+                className="btn-modal-close"
+                style={{ background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
+              >
+                <CheckCircle2 size={18} />
+                <span>Pay ₹{(offlineModalData.amount / 100).toLocaleString('en-IN')} (Success)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setOfflineModalData(null);
+                  setIsSubmitting(false);
+                  setGlobalError('Payment failed: Transaction cancelled by user. Your cart has not been cleared. Please try again.');
                 }}
                 className="btn-modal-close"
+                style={{ background: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}
               >
-                Simulate Successful Payment
+                <AlertCircle size={18} />
+                <span>Simulate Payment Failure</span>
               </button>
+
               <button
+                type="button"
                 onClick={() => setOfflineModalData(null)}
                 className="btn-modal-close"
                 style={{ background: '#94a3b8' }}
               >
-                Cancel
+                Cancel & Return
               </button>
             </div>
           </div>
